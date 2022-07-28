@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 	"io/ioutil"
 	"math/rand"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,7 +71,7 @@ func checkValuePanics(t *testing.T, itr Iterator) {
 func newTempDB(t *testing.T, backend BackendType) (db DB, dbDir string) {
 	dirname, err := ioutil.TempDir("", "db_common_test")
 	require.NoError(t, err)
-	db, err = NewDB("testdb", backend, dirname)
+	db, err = NewDB("testdb"+strconv.Itoa(time.Now().Nanosecond()), backend, dirname)
 	require.NoError(t, err)
 	return db, dirname
 }
