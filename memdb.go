@@ -206,3 +206,9 @@ func (db *MemDB) ReverseIteratorNoMtx(start, end []byte) (Iterator, error) {
 	}
 	return newMemDBIteratorMtxChoice(db, start, end, true, false), nil
 }
+
+// NewBatchWithSize implements DB.
+// It does the same thing as NewBatch because we can't pre-allocate memDBBatch
+func (db *MemDB) NewBatchWithSize(size int) Batch {
+	return newMemDBBatch(db)
+}

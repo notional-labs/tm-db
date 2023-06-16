@@ -192,3 +192,15 @@ func (db *GoLevelDB) ReverseIterator(start, end []byte) (Iterator, error) {
 	itr := db.db.NewIterator(&util.Range{Start: start, Limit: end}, nil)
 	return newGoLevelDBIterator(itr, start, end, true), nil
 }
+
+// NewBatchWithSize implements DB.
+func (db *GoLevelDB) NewBatchWithSize(size int) Batch {
+	return newGoLevelDBBatchWithSize(db, size)
+}
+
+func newGoLevelDBBatchWithSize(db *GoLevelDB, size int) *goLevelDBBatch {
+	return &goLevelDBBatch{
+		db:    db,
+		batch: leveldb.MakeBatch(size),
+	}
+}

@@ -100,6 +100,10 @@ func (rd *RemoteDB) NewBatch() db.Batch {
 	return newBatch(rd)
 }
 
+func (rd *RemoteDB) NewBatchWithSize(size int) db.Batch {
+	return newBatch(rd)
+}
+
 // TODO: Implement Print when db.DB implements a method
 // to print to a string and not db.Print to stdout.
 func (rd *RemoteDB) Print() error {

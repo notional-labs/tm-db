@@ -202,3 +202,8 @@ func (pdb *PrefixDB) Stats() map[string]string {
 func (pdb *PrefixDB) prefixed(key []byte) []byte {
 	return append(cp(pdb.prefix), key...)
 }
+
+// NewBatchWithSize implements DB.
+func (pdb *PrefixDB) NewBatchWithSize(size int) Batch {
+	return newPrefixBatch(pdb.prefix, pdb.db.NewBatchWithSize(size))
+}

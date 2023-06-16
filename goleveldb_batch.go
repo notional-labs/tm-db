@@ -19,6 +19,14 @@ func newGoLevelDBBatch(db *GoLevelDB) *goLevelDBBatch {
 	}
 }
 
+// GetByteSize implements Batch
+func (b *goLevelDBBatch) GetByteSize() (int, error) {
+	if b.batch == nil {
+		return 0, errBatchClosed
+	}
+	return len(b.batch.Dump()), nil
+}
+
 // Set implements Batch.
 func (b *goLevelDBBatch) Set(key, value []byte) error {
 	if len(key) == 0 {

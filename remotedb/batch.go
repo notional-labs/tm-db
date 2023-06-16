@@ -82,3 +82,7 @@ func (b *batch) Close() error {
 	b.ops = nil
 	return nil
 }
+
+func (b *batch) GetByteSize() (int, error) {
+	return 0, nil
+}
