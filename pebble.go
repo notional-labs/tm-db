@@ -3,6 +3,7 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/cockroachdb/pebble"
@@ -11,6 +12,7 @@ import (
 // ForceSync
 /*
 This is set at compile time. Could be 0 or 1, defaults is 0.
+Set at runtime using environment variable PEBBLEDB_FORCESYNC=1
 It will force using Sync for NoSync functions (Set, Delete, Write)
 
 Used as a workaround for chain-upgrade issue: At the upgrade-block, the sdk will panic without flushing data to disk or
@@ -57,7 +59,7 @@ func init() {
 	}
 	registerDBCreator(PebbleDBBackend, dbCreator, false)
 
-	if ForceSync == "1" {
+	if ForceSync == "1" || os.Getenv("PEBBLEDB_FORCESYNC") == "1" {
 		isForceSync = true
 	}
 }
