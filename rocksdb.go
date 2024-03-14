@@ -8,22 +8,22 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/cosmos/gorocksdb"
+	"github.com/linxGnu/grocksdb"
 )
 
 func init() {
 	dbCreator := func(name string, dir string) (DB, error) {
 		return NewRocksDB(name, dir)
 	}
-	registerDBCreator(RocksDBBackend, dbCreator, false)
+	registerDBCreator(RocksDBBackend, dbCreator)
 }
 
 // RocksDB is a RocksDB backend.
 type RocksDB struct {
-	db     *gorocksdb.DB
-	ro     *gorocksdb.ReadOptions
-	wo     *gorocksdb.WriteOptions
-	woSync *gorocksdb.WriteOptions
+	db     *grocksdb.DB
+	ro     *grocksdb.ReadOptions
+	wo     *grocksdb.WriteOptions
+	woSync *grocksdb.WriteOptions
 }
 
 var _ DB = (*RocksDB)(nil)
@@ -32,14 +32,12 @@ func NewRocksDB(name string, dir string) (*RocksDB, error) {
 	// default rocksdb option, good enough for most cases, including heavy workloads.
 	// 1GB table cache, 512MB write buffer(may use 50% more on heavy workloads).
 	// compression: snappy as default, need to -lsnappy to enable.
-	bbto := gorocksdb.NewDefaultBlockBasedTableOptions()
-	bbto.SetBlockCache(gorocksdb.NewLRUCache(1 << 30))
-	bbto.SetFilterPolicy(gorocksdb.NewBloomFilter(10))
+	bbto := grocksdb.NewDefaultBlockBasedTableOptions()
+	bbto.SetBlockCache(grocksdb.NewLRUCache(1 << 30))
+	bbto.SetFilterPolicy(grocksdb.NewBloomFilter(10))
 
-	opts := gorocksdb.NewDefaultOptions()
+	opts := grocksdb.NewDefaultOptions()
 	opts.SetBlockBasedTableFactory(bbto)
-	// SetMaxOpenFiles to 4096 seems to provide a reliable performance boost
-	opts.SetMaxOpenFiles(4096)
 	opts.SetCreateIfMissing(true)
 	opts.IncreaseParallelism(runtime.NumCPU())
 	// 1.5GB maximum memory use for writebuffer.
@@ -47,23 +45,26 @@ func NewRocksDB(name string, dir string) (*RocksDB, error) {
 	return NewRocksDBWithOptions(name, dir, opts)
 }
 
-func NewRocksDBWithOptions(name string, dir string, opts *gorocksdb.Options) (*RocksDB, error) {
+func NewRocksDBWithOptions(name string, dir string, opts *grocksdb.Options) (*RocksDB, error) {
 	dbPath := filepath.Join(dir, name+".db")
-	db, err := gorocksdb.OpenDb(opts, dbPath)
+	db, err := grocksdb.OpenDb(opts, dbPath)
 	if err != nil {
 		return nil, err
 	}
-	ro := gorocksdb.NewDefaultReadOptions()
-	wo := gorocksdb.NewDefaultWriteOptions()
-	woSync := gorocksdb.NewDefaultWriteOptions()
+	ro := grocksdb.NewDefaultReadOptions()
+	wo := grocksdb.NewDefaultWriteOptions()
+	woSync := grocksdb.NewDefaultWriteOptions()
 	woSync.SetSync(true)
-	database := &RocksDB{
+	return NewRocksDBWithRawDB(db, ro, wo, woSync), nil
+}
+
+func NewRocksDBWithRawDB(db *grocksdb.DB, ro *grocksdb.ReadOptions, wo *grocksdb.WriteOptions, woSync *grocksdb.WriteOptions) *RocksDB {
+	return &RocksDB{
 		db:     db,
 		ro:     ro,
 		wo:     wo,
 		woSync: woSync,
 	}
-	return database, nil
 }
 
 // Get implements DB.
@@ -141,7 +142,7 @@ func (db *RocksDB) DeleteSync(key []byte) error {
 	return nil
 }
 
-func (db *RocksDB) DB() *gorocksdb.DB {
+func (db *RocksDB) DB() *grocksdb.DB {
 	return db.db
 }
 
@@ -200,4 +201,9 @@ func (db *RocksDB) ReverseIterator(start, end []byte) (Iterator, error) {
 	}
 	itr := db.db.NewIterator(db.ro)
 	return newRocksDBIterator(itr, start, end, true), nil
+}
+
+func (db *RocksDB) Compact(start, end []byte) error {
+	db.db.CompactRange(grocksdb.Range{Start: start, Limit: end})
+	return nil
 }

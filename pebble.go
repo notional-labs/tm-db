@@ -1,4 +1,5 @@
 //go:build pebbledb
+// +build pebbledb
 
 package db
 
@@ -10,57 +11,11 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
-// ForceSync
-/*
-This is set at compile time. Could be 0 or 1, defaults is 1.
-It forces using Sync for NoSync functions (Set, Delete, Write)
-
-Notice if ForceSync=0: performance will be better. However, there is an issue when upgrading.
-And the workaround (if using ForceSync=0):
-At the upgrade-block, the sdk will panic without flushing data to disk or closing dbs properly.
-
-Upgrade guide:
-	1. After seeing `UPGRADE "xxxx" NEED at height....`, restart current version with `-X github.com/tendermint/tm-db.ForceSync=1`
-	2. Restart new version as normal
-
-
-Example: Upgrading sifchain from v0.14.0 to v0.15.0
-
-# log:
-panic: UPGRADE "0.15.0" NEEDED at height: 8170210: {"binaries":{"linux/amd64":"https://github.com/Sifchain/sifnode/releases/download/v0.15.0/sifnoded-v0.15.0-linux-amd64.zip?checksum=0c03b5846c5a13dcc0d9d3127e4f0cee0aeddcf2165177b2f2e0d60dbcf1a5ea"}}
-
-# step1
-git reset --hard
-git checkout v0.14.0
-go mod edit -replace github.com/tendermint/tm-db=github.com/baabeetaa/tm-db@pebble
-go mod tidy
-go install -tags pebbledb -ldflags "-w -s -X github.com/cosmos/cosmos-sdk/types.DBBackend=pebbledb -X github.com/tendermint/tm-db.ForceSync=1" ./cmd/sifnoded
-
-$HOME/go/bin/sifnoded start --db_backend=pebbledb
-
-
-# step 2
-git reset --hard
-git checkout v0.15.0
-go mod edit -replace github.com/tendermint/tm-db=github.com/baabeetaa/tm-db@pebble
-go mod tidy
-go install -tags pebbledb -ldflags "-w -s -X github.com/cosmos/cosmos-sdk/types.DBBackend=pebbledb" ./cmd/sifnoded
-
-$HOME/go/bin/sifnoded start --db_backend=pebbledb
-
-*/
-var ForceSync = "1"
-var isForceSync = false
-
 func init() {
 	dbCreator := func(name string, dir string) (DB, error) {
 		return NewPebbleDB(name, dir)
 	}
-	registerDBCreator(PebbleDBBackend, dbCreator, false)
-
-	if ForceSync == "1" {
-		isForceSync = true
-	}
+	registerDBCreator(PebbleDBBackend, dbCreator)
 }
 
 // PebbleDB is a PebbleDB backend.
@@ -90,13 +45,11 @@ func NewPebbleDBWithOpts(name string, dir string, opts *pebble.Options) (*Pebble
 
 // Get implements DB.
 func (db *PebbleDB) Get(key []byte) ([]byte, error) {
-	//fmt.Println("PebbleDB.Get")
 	if len(key) == 0 {
 		return nil, errKeyEmpty
 	}
 
 	res, closer, err := db.db.Get(key)
-
 	if err != nil {
 		if err == pebble.ErrNotFound {
 			return nil, nil
@@ -110,20 +63,19 @@ func (db *PebbleDB) Get(key []byte) ([]byte, error) {
 
 // Has implements DB.
 func (db *PebbleDB) Has(key []byte) (bool, error) {
-	//fmt.Println("PebbleDB.Has")
 	if len(key) == 0 {
 		return false, errKeyEmpty
 	}
-	bytes, err := db.Get(key)
+
+	bytesPeb, err := db.Get(key)
 	if err != nil {
 		return false, err
 	}
-	return bytes != nil, nil
+	return bytesPeb != nil, nil
 }
 
 // Set implements DB.
 func (db *PebbleDB) Set(key []byte, value []byte) error {
-	//fmt.Println("PebbleDB.Set")
 	if len(key) == 0 {
 		return errKeyEmpty
 	}
@@ -132,10 +84,6 @@ func (db *PebbleDB) Set(key []byte, value []byte) error {
 	}
 
 	wopts := pebble.NoSync
-	if isForceSync {
-		wopts = pebble.Sync
-	}
-
 	err := db.db.Set(key, value, wopts)
 	if err != nil {
 		return err
@@ -145,7 +93,6 @@ func (db *PebbleDB) Set(key []byte, value []byte) error {
 
 // SetSync implements DB.
 func (db *PebbleDB) SetSync(key []byte, value []byte) error {
-	//fmt.Println("PebbleDB.SetSync")
 	if len(key) == 0 {
 		return errKeyEmpty
 	}
@@ -161,15 +108,11 @@ func (db *PebbleDB) SetSync(key []byte, value []byte) error {
 
 // Delete implements DB.
 func (db *PebbleDB) Delete(key []byte) error {
-	//fmt.Println("PebbleDB.Delete")
 	if len(key) == 0 {
 		return errKeyEmpty
 	}
 
 	wopts := pebble.NoSync
-	if isForceSync {
-		wopts = pebble.Sync
-	}
 	err := db.db.Delete(key, wopts)
 	if err != nil {
 		return err
@@ -179,7 +122,6 @@ func (db *PebbleDB) Delete(key []byte) error {
 
 // DeleteSync implements DB.
 func (db PebbleDB) DeleteSync(key []byte) error {
-	//fmt.Println("PebbleDB.DeleteSync")
 	if len(key) == 0 {
 		return errKeyEmpty
 	}
@@ -194,9 +136,36 @@ func (db *PebbleDB) DB() *pebble.DB {
 	return db.db
 }
 
+func (db *PebbleDB) Compact(start, end []byte) (err error) {
+	// Currently nil,nil is an invalid range in Pebble.
+	// This was taken from https://github.com/cockroachdb/pebble/issues/1474
+	// In case the start and end keys are the same
+	// pebbleDB will throw an error that it cannot compact.
+	if start != nil && end != nil {
+		return db.db.Compact(start, end, true)
+	}
+	iter, err := db.db.NewIter(nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err2 := iter.Close()
+		if err2 != nil {
+			err = err2
+		}
+	}()
+	if start == nil && iter.First() {
+		start = append(start, iter.Key()...)
+	}
+	if end == nil && iter.Last() {
+		end = append(end, iter.Key()...)
+	}
+	err = db.db.Compact(start, end, true)
+	return
+}
+
 // Close implements DB.
 func (db PebbleDB) Close() error {
-	//fmt.Println("PebbleDB.Close")
 	db.db.Close()
 	return nil
 }
@@ -217,14 +186,7 @@ func (db *PebbleDB) Print() error {
 }
 
 // Stats implements DB.
-func (db *PebbleDB) Stats() map[string]string {
-	/*
-		keys := []string{"rocksdb.stats"}
-		stats := make(map[string]string, len(keys))
-		for _, key := range keys {
-			stats[key] = db.(key)
-		}
-	*/
+func (*PebbleDB) Stats() map[string]string {
 	return nil
 }
 
@@ -235,7 +197,6 @@ func (db *PebbleDB) NewBatch() Batch {
 
 // Iterator implements DB.
 func (db *PebbleDB) Iterator(start, end []byte) (Iterator, error) {
-	//fmt.Println("PebbleDB.Iterator")
 	if (start != nil && len(start) == 0) || (end != nil && len(end) == 0) {
 		return nil, errKeyEmpty
 	}
@@ -243,7 +204,10 @@ func (db *PebbleDB) Iterator(start, end []byte) (Iterator, error) {
 		LowerBound: start,
 		UpperBound: end,
 	}
-	itr := db.db.NewIter(&o)
+	itr, err := db.db.NewIter(&o)
+	if err != nil {
+		return nil, err
+	}
 	itr.First()
 
 	return newPebbleDBIterator(itr, start, end, false), nil
@@ -251,7 +215,6 @@ func (db *PebbleDB) Iterator(start, end []byte) (Iterator, error) {
 
 // ReverseIterator implements DB.
 func (db *PebbleDB) ReverseIterator(start, end []byte) (Iterator, error) {
-	//fmt.Println("PebbleDB.ReverseIterator")
 	if (start != nil && len(start) == 0) || (end != nil && len(end) == 0) {
 		return nil, errKeyEmpty
 	}
@@ -259,7 +222,10 @@ func (db *PebbleDB) ReverseIterator(start, end []byte) (Iterator, error) {
 		LowerBound: start,
 		UpperBound: end,
 	}
-	itr := db.db.NewIter(&o)
+	itr, err := db.db.NewIter(&o)
+	if err != nil {
+		return nil, err
+	}
 	itr.Last()
 	return newPebbleDBIterator(itr, start, end, true), nil
 }
@@ -275,13 +241,17 @@ var _ Batch = (*pebbleDBBatch)(nil)
 
 func newPebbleDBBatch(db *PebbleDB) *pebbleDBBatch {
 	return &pebbleDBBatch{
+		// For regular batch operations batch.db is going to be set to db
+		// and it is not needed to initialize the DB here.
+		// This is set to enable general DB operations like compaction
+		// (e.x. a call do pebbleDBBatch.db.Compact() would throw a nil pointer exception)
+		db:    db,
 		batch: db.db.NewBatch(),
 	}
 }
 
 // Set implements Batch.
 func (b *pebbleDBBatch) Set(key, value []byte) error {
-	//fmt.Println("pebbleDBBatch.Set")
 	if len(key) == 0 {
 		return errKeyEmpty
 	}
@@ -291,34 +261,29 @@ func (b *pebbleDBBatch) Set(key, value []byte) error {
 	if b.batch == nil {
 		return errBatchClosed
 	}
-	b.batch.Set(key, value, nil)
-	return nil
+
+	return b.batch.Set(key, value, nil)
 }
 
 // Delete implements Batch.
 func (b *pebbleDBBatch) Delete(key []byte) error {
-	//fmt.Println("pebbleDBBatch.Delete")
 	if len(key) == 0 {
 		return errKeyEmpty
 	}
 	if b.batch == nil {
 		return errBatchClosed
 	}
-	b.batch.Delete(key, nil)
-	return nil
+
+	return b.batch.Delete(key, nil)
 }
 
 // Write implements Batch.
 func (b *pebbleDBBatch) Write() error {
-	//fmt.Println("pebbleDBBatch.Write")
 	if b.batch == nil {
 		return errBatchClosed
 	}
 
 	wopts := pebble.NoSync
-	if isForceSync {
-		wopts = pebble.Sync
-	}
 	err := b.batch.Commit(wopts)
 	if err != nil {
 		return err
@@ -330,7 +295,6 @@ func (b *pebbleDBBatch) Write() error {
 
 // WriteSync implements Batch.
 func (b *pebbleDBBatch) WriteSync() error {
-	//fmt.Println("pebbleDBBatch.WriteSync")
 	if b.batch == nil {
 		return errBatchClosed
 	}
@@ -344,7 +308,6 @@ func (b *pebbleDBBatch) WriteSync() error {
 
 // Close implements Batch.
 func (b *pebbleDBBatch) Close() error {
-	//fmt.Println("pebbleDBBatch.Close")
 	if b.batch != nil {
 		err := b.batch.Close()
 		if err != nil {
@@ -386,13 +349,11 @@ func newPebbleDBIterator(source *pebble.Iterator, start, end []byte, isReverse b
 
 // Domain implements Iterator.
 func (itr *pebbleDBIterator) Domain() ([]byte, []byte) {
-	//fmt.Println("pebbleDBIterator.Domain")
 	return itr.start, itr.end
 }
 
 // Valid implements Iterator.
 func (itr *pebbleDBIterator) Valid() bool {
-	//fmt.Println("pebbleDBIterator.Valid")
 	// Once invalid, forever invalid.
 	if itr.isInvalid {
 		return false
@@ -436,21 +397,22 @@ func (itr *pebbleDBIterator) Valid() bool {
 
 // Key implements Iterator.
 func (itr *pebbleDBIterator) Key() []byte {
-	//fmt.Println("pebbleDBIterator.Key")
+	// Key returns a copy of the current key.
+	// See https://github.com/cockroachdb/pebble/blob/v1.0.0/iterator.go#L2106
 	itr.assertIsValid()
 	return cp(itr.source.Key())
 }
 
 // Value implements Iterator.
 func (itr *pebbleDBIterator) Value() []byte {
-	//fmt.Println("pebbleDBIterator.Value")
+	// Value returns a copy of the current value.
+	// See https://github.com/cockroachdb/pebble/blob/v1.0.0/iterator.go#L2116
 	itr.assertIsValid()
 	return cp(itr.source.Value())
 }
 
 // Next implements Iterator.
 func (itr pebbleDBIterator) Next() {
-	//fmt.Println("pebbleDBIterator.Next")
 	itr.assertIsValid()
 	if itr.isReverse {
 		itr.source.Prev()
@@ -466,7 +428,6 @@ func (itr *pebbleDBIterator) Error() error {
 
 // Close implements Iterator.
 func (itr *pebbleDBIterator) Close() error {
-	//fmt.Println("pebbleDBIterator.Close")
 	err := itr.source.Close()
 	if err != nil {
 		return err
